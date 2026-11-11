@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sarajevo 3D</title>
+<link rel="stylesheet" href="/static/leaflet.css">
+<script src="/static/leaflet.js"></script>
+<script type="module" src="/static/model-viewer.min.js"></script>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, sans-serif; background: #111; color: #eee; }
+  header { padding: 10px 16px; font-weight: 600; font-size: 18px; background: #1b1b1b; }
+  #wrap { display: flex; height: calc(100vh - 44px); }
+  #map { flex: 1; }
+  #side { width: 420px; max-width: 45vw; overflow-y: auto; background: #181818; }
+  model-viewer { width: 100%; height: 360px; background: #222; }
+  .place { padding: 12px 16px; border-bottom: 1px solid #2a2a2a; cursor: pointer; }
+  .place:hover { background: #222; }
+  .st { font-size: 13px; color: #aaa; }
+  .ready { color: #4dce81; } .processing { color: #ebc135; } .failed { color: #e63764; }
+  button { background: #333; color: #eee; border: 1px solid #555; border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+  #empty { padding: 16px; color: #aaa; }
+  @media (max-width: 800px) { #wrap { flex-direction: column; } #side { width: 100%; max-width: none; height: 55vh; } }
+</style>
+</head>
+<body>
+<header>Sarajevo 3D</header>
+<div id="wrap">
+  <div id="map"></div>
+  <div id="side">
+    <model-viewer id="viewer" camera-controls touch-action="pan-y" shadow-intensity="0" exposure="1"
+                  alt="3D model of the selected place"></model-viewer>
+    <div id="list"></div>
+    <div id="empty">No places yet. Take photos with the app; places appear here.</div>
+  </div>
+</div>
+<script>
+const map = L.map('map').setView([43.8590, 18.4310], 15);   // Baščaršija
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'
+}).addTo(map);
+const markers = {}, latest = {};
+const viewer = document.getElementById('viewer');
+let fitted = false;
+
+function label(p) {
+  if (p.status === 'ready') return `<span class="ready">3D ready</span> · built from ${p.built_with} photos`;
+  if (p.status === 'processing') return `<span class="processing">Building 3D… ${p.progress || 0}%</span>`;
+  if (p.status === 'failed') return `<span class="failed">Build failed</span> · ${p.error || ''}`;
+  return `Collecting photos`;
+}
+
+function show(p) {
+  if (p.model) viewer.src = p.model;
+  map.setView([p.lat, p.lon], 18);
+}
+
+async function refresh() {
+  const places = await (await fetch('/places')).json();
+  document.getElementById('empty').style.display = places.length ? 'none' : 'block';
+  const list = document.getElementById('list');
+  list.innerHTML = '';
+  places.forEach((p, i) => {
+    latest[p.id] = p;
+    const div = document.createElement('div');
+    div.className = 'place';
+    div.innerHTML = `<b>Place ${i + 1}</b> · ${p.photo_count} photos<div class="st">${label(p)}</div>`;
+    if (p.status !== 'processing' && p.photo_count >= 5) {
+      const b = document.createElement('button');
+      b.textContent = p.model ? 'Rebuild 3D now' : 'Build 3D now';
+      b.onclick = async (e) => { e.stopPropagation(); await fetch(`/places/${p.id}/build`, {method: 'POST'}); refresh(); };
+      div.appendChild(b);
+    }
+    div.onclick = () => show(p);
+    list.appendChild(div);
+
+    const color = p.status === 'ready' ? '#4dce81' : p.status === 'processing' ? '#ebc135' : '#888';
+    if (!markers[p.id]) {
+      markers[p.id] = L.circleMarker([p.lat, p.lon], {radius: 9, weight: 2}).addTo(map);
+      const id = p.id;
+      markers[p.id].on('click', () => show(latest[id]));
+    }
+    markers[p.id].setLatLng([p.lat, p.lon]).setStyle({color, fillColor: color, fillOpacity: 0.6});
+    markers[p.id].bindTooltip(`Place ${i + 1}: ${p.photo_count} photos`);
+  });
+  if (!fitted && places.length) {
+    map.fitBounds(places.map(p => [p.lat, p.lon]), {maxZoom: 17, padding: [40, 40]});
+    fitted = true;
+    const first = places.find(p => p.model);
+    if (first) viewer.src = first.model;
+  }
+}
+refresh();
+setInterval(refresh, 10000);
+</script>
+</body>
+</html>

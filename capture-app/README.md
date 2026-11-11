@@ -1,4 +1,6 @@
-# Sarajevo 3D Capture, version 0.2
+# Sarajevo 3D Capture, version 0.4
+
+See ../README.md for the whole system (server that builds the 3D models).
 
 A small Android app: tap the button, it takes one photo and writes the phone's
 GPS position into it. Photos are saved in one folder per day, ready for OpenDroneMap / WebODM, which turns the photos into a measured
@@ -40,10 +42,10 @@ a phone and open it (allow "install unknown apps").
 
 Expect: 30 to 300 photos per building, 20 to 90 minutes to process on a normal PC.
 
-## Known limits of 0.2
+## Known limits of 0.4
 
 - Not yet compiled or tested on a real phone: the first Android Studio build may
   show small errors to fix.
-- No upload, no map, no face blurring yet: photos stay on the phone.
+- Photos wait on the phone and are sent to your own server (button "Server") automatically when on Wi-Fi.
 - Phone GPS is 3 to 10 m off in narrow streets, so the model's size is accurate
   but its position on the map is only roughly right.

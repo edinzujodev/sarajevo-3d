@@ -11,8 +11,8 @@ android {
         applicationId = "ba.sarajevo3d.capture"
         minSdk = 29          // Android 10 or newer
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.2"
+        versionCode = 4
+        versionName = "0.4"
     }
 
     buildTypes {
@@ -37,4 +37,5 @@ dependencies {
     implementation("androidx.camera:camera-camera2:$camerax")
     implementation("androidx.camera:camera-lifecycle:$camerax")
     implementation("androidx.camera:camera-view:$camerax")
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
 }

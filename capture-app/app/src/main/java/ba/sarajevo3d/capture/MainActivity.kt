@@ -3,6 +3,8 @@ package ba.sarajevo3d.capture
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.ContentValues
+import android.content.Intent
+import android.net.Uri
 import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationListener
@@ -11,9 +13,11 @@ import android.os.Bundle
 import android.os.Looper
 import android.provider.MediaStore
 import android.widget.Button
+import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
@@ -25,6 +29,7 @@ import androidx.core.content.ContextCompat
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import android.content.SharedPreferences
 
 /**
  * Sarajevo 3D capture, version 0.1.
@@ -32,6 +37,10 @@ import java.util.Locale
  * One tap = one photo. The phone's GPS position is written into each photo
  * (EXIF). Photos go to Pictures/Sarajevo3D/<date>/, one folder per day, ready
  * to drop into OpenDroneMap / WebODM.
+ *
+ * Every photo is also put on a waiting list (UploadQueue). When the phone is on
+ * Wi-Fi, a background job sends the list to the Sarajevo 3D server on your PC,
+ * which builds the 3D models. Works also when the app is closed.
  *
  * No API keys and no Google services: CameraX for the camera and Android's
  * built-in LocationManager for GPS.
@@ -48,6 +57,9 @@ class MainActivity : AppCompatActivity() {
 
     private var photoCount = 0
     private var lastSaved = ""
+    private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+        runOnUiThread { updateStatus() }
+    }
 
     // Full objects (not lambdas): on Android 10 the framework still calls the
     // other LocationListener methods, and a lambda would crash there.
@@ -100,6 +112,12 @@ class MainActivity : AppCompatActivity() {
         locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
 
         shutterButton.setOnClickListener { takePhoto() }
+        findViewById<Button>(R.id.server).setOnClickListener { askServer() }
+        findViewById<Button>(R.id.open_map).setOnClickListener {
+            val server = serverUrl()
+            if (server.isEmpty()) askServer()
+            else startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(server)))
+        }
 
         permissionLauncher.launch(
             arrayOf(
@@ -170,6 +188,7 @@ class MainActivity : AppCompatActivity() {
                     shutterButton.isEnabled = true
                     photoCount++
                     lastSaved = "Pictures/Sarajevo3D/$folder"
+                    output.savedUri?.let { UploadQueue.add(this@MainActivity, it.toString()) }
                     previewView.animate().alpha(0.3f).setDuration(80)
                         .withEndAction { previewView.animate().alpha(1f).setDuration(80) }
                     updateStatus()
@@ -199,7 +218,52 @@ class MainActivity : AppCompatActivity() {
         } else {
             "$photoCount photos this session, saved in $lastSaved"
         }
-        statusText.text = "$gps\n$count"
+        val settings = getSharedPreferences("settings", MODE_PRIVATE)
+        val waiting = UploadQueue.count(this)
+        val up = when {
+            serverUrl().isEmpty() -> "\nNo server set: photos only saved on the phone ($waiting waiting)"
+            waiting > 0 -> "\n$waiting photos waiting, sent automatically on Wi-Fi"
+            else -> "\nAll photos sent"
+        } + (settings.getString("last_place", null)?.let { "\n$it" } ?: "")
+        statusText.text = "$gps\n$count$up"
+    }
+
+    // ---- server --------------------------------------------------------------
+
+    private fun serverUrl(): String =
+        getSharedPreferences("settings", MODE_PRIVATE).getString("server", "")!!.trimEnd('/')
+
+    private fun askServer() {
+        val input = EditText(this).apply {
+            setText(serverUrl().ifEmpty { "http://192.168.1.20:8000" })
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Server address")
+            .setMessage("Address of the Sarajevo 3D server on your PC (shown when you start it). Leave empty to only save photos on the phone.")
+            .setView(input)
+            .setPositiveButton("Save") { _, _ ->
+                var url = input.text.toString().trim()
+                if (url.isNotEmpty() && !url.startsWith("http")) url = "http://$url"
+                getSharedPreferences("settings", MODE_PRIVATE).edit().putString("server", url).apply()
+                UploadQueue.schedule(this)
+                updateStatus()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        UploadQueue.prefs(this).registerOnSharedPreferenceChangeListener(prefsListener)
+        getSharedPreferences("settings", MODE_PRIVATE).registerOnSharedPreferenceChangeListener(prefsListener)
+        if (UploadQueue.count(this) > 0) UploadQueue.schedule(this) // try again now
+        updateStatus()
+    }
+
+    override fun onPause() {
+        super.onPause()
+        UploadQueue.prefs(this).unregisterOnSharedPreferenceChangeListener(prefsListener)
+        getSharedPreferences("settings", MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(prefsListener)
     }
 
     override fun onDestroy() {
